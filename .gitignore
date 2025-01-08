@@ -1,0 +1,10 @@
+# Python
+__pycache__
+
+# Artefacts
+agent_repos/
+cache
+swecomm_runs/test**/
+
+# Secrets
+.env

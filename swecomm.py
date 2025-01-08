@@ -1,30 +1,38 @@
-from moatless.workspace import Workspace
-from moatless.benchmark.swebench import get_repo_dir_name, setup_swebench_repo
-from tqdm import tqdm
-import os
-import random
-from utils import get_resolved_set, get_candidate_instances, evaluate_ranking
-from tqdm import tqdm
+# %%
 import argparse
 import json
-from prompts import SINGLE_SCORING_WITH_IDENTIFIED_SPANS_TEMPLATE, SYSTEM_PROMPT
-from utils import (
-    get_before_after_code_with_context,
-    extract_gpt4_tag,
-    get_identified_spans,
-    get_submission_patches,
-    get_submission_resolved_set,
-    get_resolved_set,
-    get_full_data,
-)
-
+import os
+import random
 from collections import defaultdict
 
-with open("api_keys.json", "r") as f:
-    api_keys = json.load(f)
-    for k in api_keys:
-        os.environ[k] = api_keys[k]
+from tqdm import tqdm
+
+from prompts import (SINGLE_SCORING_WITH_IDENTIFIED_SPANS_TEMPLATE,
+                     SYSTEM_PROMPT)
+from utils import (evaluate_ranking, extract_gpt4_tag,
+                   get_before_after_code_with_context, get_full_data,
+                   get_resolved_set, get_submission_patches,
+                   get_submission_resolved_set)
+
+SEED = 42 # the answer to everything
+random.seed(SEED)
+
+# %%
+# with open("api_keys.json", "r") as f:
+#     api_keys = json.load(f)
+#     for k in api_keys:
+#         os.environ[k] = api_keys[k]
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
 os.environ['LITELLM_LOG'] = 'DEBUG'
+
+# %%
+import sys
+
+sys.argv = ["swecomm.py", "test_oh_committee_out_claude", "--preds_to_eval", "resource/experiments/evaluation/lite/20240725_opendevin_codeact_v1.8_claude35sonnet/all_preds.jsonl,resource/experiments/evaluation/lite/20240623_moatless_claude35sonnet/all_preds.jsonl"]
 
 parser = argparse.ArgumentParser()
 parser.add_argument("output_dir", type=str, default=None)
@@ -42,6 +50,7 @@ if not args.preds_to_eval and not args.subs_to_eval:
 if args.preds_to_eval and args.subs_to_eval:
     raise ValueError("Please provide either preds_to_eval or subs_to_eval, not both")
 
+# %%
 evals = None
 preds = {}
 resolved_sets = None
@@ -71,9 +80,8 @@ if args.subs_to_eval:
         resolved_sets[sub] = get_submission_resolved_set(sub)
     evals = subs
 
-SEED = 42 # the answer to everything
-random.seed(SEED)
 
+# %%
 dataset = get_full_data()
 
 if args.save:
@@ -84,6 +92,8 @@ if args.save:
     dataset = [instance for instance in dataset if instance["instance_id"] in resolved_sets_union]
 
 dataset = sorted(dataset, key=lambda x: x['created_at'])
+
+# %%
 
 evaluations_dir = "./swecomm_runs"
 evaluation_dir = f"{evaluations_dir}/{args.output_dir}"
@@ -124,10 +134,12 @@ whitelist = []
 
 dataset = [instance for instance in dataset if not whitelist or instance["instance_id"] in whitelist]
 
+# %%
 before_after_dict = {}
 if os.path.exists("cache/before_after_dict.json"):
     before_after_dict = json.load(open("cache/before_after_dict.json", "r"))
 
+# %%
 for instance in tqdm(dataset, desc="Preparing spans before and after patch"):
     with open(os.path.join(args.processed_span_path, f"{instance['instance_id']}.json")) as f:
         identified_spans = json.load(f)["identified_spans"]
@@ -155,17 +167,23 @@ for instance in tqdm(dataset, desc="Preparing spans before and after patch"):
                 "after": after
             }
 
+# %%
 if not os.path.exists("cache"):
     os.makedirs("cache")
 with open("cache/before_after_dict.json", "w") as f:
     json.dump(before_after_dict, f)
-        
-from litellm import token_counter
 
+
+# %% TODO:
 import litellm
-from litellm import batch_completion, completion_cost
+from litellm import batch_completion, completion_cost, token_counter
 
-for instance in tqdm(dataset, desc="Preparing requests"):
+NUM_TEST_INSTANCES = 3
+
+litellm.set_verbose = True
+
+
+for instance in tqdm(dataset[:NUM_TEST_INSTANCES], desc="Preparing requests"):
     with open(os.path.join(args.processed_span_path, f"{instance['instance_id']}.json")) as f:
         identified_spans = json.load(f)["identified_spans"]
         concat_spans = organize_identified_spans(identified_spans)
@@ -221,6 +239,7 @@ for instance in tqdm(dataset, desc="Preparing requests"):
         
         eval2patch[instance_id][eval_] = preds[eval_].get(instance_id)
 
+# %%
 tot_tokens = 0
 
 for instance_id, eval_, messages in requests:
@@ -236,13 +255,17 @@ print(f"Attemp Total requests: {len(requests)} to be sent to {args.model}")
 requests = requests
 
 responses = batch_completion(
-    model=args.model,
+    model=os.environ['LITELLM_MODEL'],
+    api_key=os.environ['LITELLM_API_KEY'],
+    base_url=os.environ['LITELLM_BASE_URL'],
     messages=[req[2] for req in requests],
-    temperature=1.2,
+    temperature=1.0,
     max_tokens=4096,
     top_p=1,
 )
 
+
+# %%
 tot_cost = 0
 for response, (instance_id, eval_, _) in zip(responses, requests):
     if hasattr(response, "choices") and response.choices:
@@ -250,6 +273,7 @@ for response, (instance_id, eval_, _) in zip(responses, requests):
         tot_cost += completion_cost(response)
     else:
         print(f"Error in response for instance {instance_id} in evaluation {eval_}")
+        msg = ""
         print(response)
     if eval_ not in eval2exp[instance_id]:        
         eval2exp[instance_id][eval_] = [{}]
@@ -274,9 +298,12 @@ for response, (instance_id, eval_, _) in zip(responses, requests):
     except Exception as e:
         print(f"Error in extracting score for instance {instance_id} in evaluation {eval_}")
 
+print(f"Total cost: {tot_cost}")
+
+# %%
 processed_meta_info = []
 
-for instance in dataset:
+for instance in dataset[:NUM_TEST_INSTANCES]:
     instance_id = instance['instance_id']
     # rank different evaluation candidates by the score
     avg = lambda l: sum(l) / len(l) if l else -1
@@ -310,6 +337,7 @@ for instance in dataset:
     
     processed_meta_info.append(meta_info)
 
+# %%
 if resolved_sets:
     for meta_info in processed_meta_info:
         for k in output_score.keys():
@@ -326,3 +354,6 @@ date = datetime.datetime.now().strftime("%Y%m%d_%H%M")
 
 with open(os.path.join(evaluation_dir, f"output_{date}.json"), 'w') as f:
     json.dump(processed_meta_info, f, indent=4)
+
+
+# %%
