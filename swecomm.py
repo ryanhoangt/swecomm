@@ -32,7 +32,7 @@ os.environ['LITELLM_LOG'] = 'DEBUG'
 # %%
 import sys
 
-sys.argv = ["swecomm.py", "oh_committee_out", "--preds_to_eval", "resource/experiments/evaluation/lite/20240725_opendevin_codeact_v1.8_claude35sonnet/all_preds.jsonl,resource/experiments/evaluation/lite/20240623_moatless_claude35sonnet/all_preds.jsonl"]
+sys.argv = ["swecomm.py", "test_oh_committee_out_claude", "--preds_to_eval", "resource/experiments/evaluation/lite/20240725_opendevin_codeact_v1.8_claude35sonnet/all_preds.jsonl,resource/experiments/evaluation/lite/20240623_moatless_claude35sonnet/all_preds.jsonl"]
 
 parser = argparse.ArgumentParser()
 parser.add_argument("output_dir", type=str, default=None)
@@ -173,11 +173,17 @@ if not os.path.exists("cache"):
 with open("cache/before_after_dict.json", "w") as f:
     json.dump(before_after_dict, f)
 
+
 # %% TODO:
 import litellm
 from litellm import batch_completion, completion_cost, token_counter
 
-for instance in tqdm(dataset, desc="Preparing requests"):
+NUM_TEST_INSTANCES = 3
+
+litellm.set_verbose = True
+
+
+for instance in tqdm(dataset[:NUM_TEST_INSTANCES], desc="Preparing requests"):
     with open(os.path.join(args.processed_span_path, f"{instance['instance_id']}.json")) as f:
         identified_spans = json.load(f)["identified_spans"]
         concat_spans = organize_identified_spans(identified_spans)
@@ -249,13 +255,17 @@ print(f"Attemp Total requests: {len(requests)} to be sent to {args.model}")
 requests = requests
 
 responses = batch_completion(
-    model=args.model,
+    model=os.environ['LITELLM_MODEL'],
+    api_key=os.environ['LITELLM_API_KEY'],
+    base_url=os.environ['LITELLM_BASE_URL'],
     messages=[req[2] for req in requests],
-    temperature=1.2,
+    temperature=1.0,
     max_tokens=4096,
     top_p=1,
 )
 
+
+# %%
 tot_cost = 0
 for response, (instance_id, eval_, _) in zip(responses, requests):
     if hasattr(response, "choices") and response.choices:
@@ -263,6 +273,7 @@ for response, (instance_id, eval_, _) in zip(responses, requests):
         tot_cost += completion_cost(response)
     else:
         print(f"Error in response for instance {instance_id} in evaluation {eval_}")
+        msg = ""
         print(response)
     if eval_ not in eval2exp[instance_id]:        
         eval2exp[instance_id][eval_] = [{}]
@@ -287,9 +298,12 @@ for response, (instance_id, eval_, _) in zip(responses, requests):
     except Exception as e:
         print(f"Error in extracting score for instance {instance_id} in evaluation {eval_}")
 
+print(f"Total cost: {tot_cost}")
+
+# %%
 processed_meta_info = []
 
-for instance in dataset:
+for instance in dataset[:NUM_TEST_INSTANCES]:
     instance_id = instance['instance_id']
     # rank different evaluation candidates by the score
     avg = lambda l: sum(l) / len(l) if l else -1
@@ -323,6 +337,7 @@ for instance in dataset:
     
     processed_meta_info.append(meta_info)
 
+# %%
 if resolved_sets:
     for meta_info in processed_meta_info:
         for k in output_score.keys():
@@ -340,3 +355,5 @@ date = datetime.datetime.now().strftime("%Y%m%d_%H%M")
 with open(os.path.join(evaluation_dir, f"output_{date}.json"), 'w') as f:
     json.dump(processed_meta_info, f, indent=4)
 
+
+# %%
