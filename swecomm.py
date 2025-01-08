@@ -1,30 +1,31 @@
-from moatless.workspace import Workspace
-from moatless.benchmark.swebench import get_repo_dir_name, setup_swebench_repo
-from tqdm import tqdm
-import os
-import random
-from utils import get_resolved_set, get_candidate_instances, evaluate_ranking
-from tqdm import tqdm
+# %%
 import argparse
 import json
-from prompts import SINGLE_SCORING_WITH_IDENTIFIED_SPANS_TEMPLATE, SYSTEM_PROMPT
-from utils import (
-    get_before_after_code_with_context,
-    extract_gpt4_tag,
-    get_identified_spans,
-    get_submission_patches,
-    get_submission_resolved_set,
-    get_resolved_set,
-    get_full_data,
-)
-
+import os
+import random
 from collections import defaultdict
 
+from tqdm import tqdm
+
+from prompts import (SINGLE_SCORING_WITH_IDENTIFIED_SPANS_TEMPLATE,
+                     SYSTEM_PROMPT)
+from utils import (evaluate_ranking, extract_gpt4_tag,
+                   get_full_data, 
+                   get_submission_patches, get_submission_resolved_set, get_resolved_set, get_before_after_code_with_context)
+
+SEED = 42 # the answer to everything
+random.seed(SEED)
+
+# %%
 with open("api_keys.json", "r") as f:
     api_keys = json.load(f)
     for k in api_keys:
         os.environ[k] = api_keys[k]
 os.environ['LITELLM_LOG'] = 'DEBUG'
+
+# %%
+import sys
+sys.argv = ["swecomm.py", "oh_committee_out", "--preds_to_eval", "resource/experiments/evaluation/lite/20240725_opendevin_codeact_v1.8_claude35sonnet/all_preds.jsonl,resource/experiments/evaluation/lite/20240623_moatless_claude35sonnet/all_preds.jsonl"]
 
 parser = argparse.ArgumentParser()
 parser.add_argument("output_dir", type=str, default=None)
@@ -42,6 +43,7 @@ if not args.preds_to_eval and not args.subs_to_eval:
 if args.preds_to_eval and args.subs_to_eval:
     raise ValueError("Please provide either preds_to_eval or subs_to_eval, not both")
 
+# %%
 evals = None
 preds = {}
 resolved_sets = None
@@ -71,9 +73,8 @@ if args.subs_to_eval:
         resolved_sets[sub] = get_submission_resolved_set(sub)
     evals = subs
 
-SEED = 42 # the answer to everything
-random.seed(SEED)
 
+# %%
 dataset = get_full_data()
 
 if args.save:
@@ -84,6 +85,8 @@ if args.save:
     dataset = [instance for instance in dataset if instance["instance_id"] in resolved_sets_union]
 
 dataset = sorted(dataset, key=lambda x: x['created_at'])
+
+# %%
 
 evaluations_dir = "./swecomm_runs"
 evaluation_dir = f"{evaluations_dir}/{args.output_dir}"
@@ -124,10 +127,12 @@ whitelist = []
 
 dataset = [instance for instance in dataset if not whitelist or instance["instance_id"] in whitelist]
 
+# %%
 before_after_dict = {}
 if os.path.exists("cache/before_after_dict.json"):
     before_after_dict = json.load(open("cache/before_after_dict.json", "r"))
 
+# %%
 for instance in tqdm(dataset, desc="Preparing spans before and after patch"):
     with open(os.path.join(args.processed_span_path, f"{instance['instance_id']}.json")) as f:
         identified_spans = json.load(f)["identified_spans"]
@@ -155,15 +160,15 @@ for instance in tqdm(dataset, desc="Preparing spans before and after patch"):
                 "after": after
             }
 
+# %%
 if not os.path.exists("cache"):
     os.makedirs("cache")
 with open("cache/before_after_dict.json", "w") as f:
     json.dump(before_after_dict, f)
-        
-from litellm import token_counter
 
+# %%
 import litellm
-from litellm import batch_completion, completion_cost
+from litellm import batch_completion, completion_cost, token_counter
 
 for instance in tqdm(dataset, desc="Preparing requests"):
     with open(os.path.join(args.processed_span_path, f"{instance['instance_id']}.json")) as f:
@@ -326,3 +331,4 @@ date = datetime.datetime.now().strftime("%Y%m%d_%H%M")
 
 with open(os.path.join(evaluation_dir, f"output_{date}.json"), 'w') as f:
     json.dump(processed_meta_info, f, indent=4)
+# %%
