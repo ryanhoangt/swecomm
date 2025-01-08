@@ -1,3 +1,9 @@
+# Python
 __pycache__
 
+# Artefacts
 agent_repos/
+cache
+
+# Secrets
+.env

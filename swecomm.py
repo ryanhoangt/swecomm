@@ -10,21 +10,28 @@ from tqdm import tqdm
 from prompts import (SINGLE_SCORING_WITH_IDENTIFIED_SPANS_TEMPLATE,
                      SYSTEM_PROMPT)
 from utils import (evaluate_ranking, extract_gpt4_tag,
-                   get_full_data, 
-                   get_submission_patches, get_submission_resolved_set, get_resolved_set, get_before_after_code_with_context)
+                   get_before_after_code_with_context, get_full_data,
+                   get_resolved_set, get_submission_patches,
+                   get_submission_resolved_set)
 
 SEED = 42 # the answer to everything
 random.seed(SEED)
 
 # %%
-with open("api_keys.json", "r") as f:
-    api_keys = json.load(f)
-    for k in api_keys:
-        os.environ[k] = api_keys[k]
+# with open("api_keys.json", "r") as f:
+#     api_keys = json.load(f)
+#     for k in api_keys:
+#         os.environ[k] = api_keys[k]
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
 os.environ['LITELLM_LOG'] = 'DEBUG'
 
 # %%
 import sys
+
 sys.argv = ["swecomm.py", "oh_committee_out", "--preds_to_eval", "resource/experiments/evaluation/lite/20240725_opendevin_codeact_v1.8_claude35sonnet/all_preds.jsonl,resource/experiments/evaluation/lite/20240623_moatless_claude35sonnet/all_preds.jsonl"]
 
 parser = argparse.ArgumentParser()
@@ -166,7 +173,7 @@ if not os.path.exists("cache"):
 with open("cache/before_after_dict.json", "w") as f:
     json.dump(before_after_dict, f)
 
-# %%
+# %% TODO:
 import litellm
 from litellm import batch_completion, completion_cost, token_counter
 
@@ -226,6 +233,7 @@ for instance in tqdm(dataset, desc="Preparing requests"):
         
         eval2patch[instance_id][eval_] = preds[eval_].get(instance_id)
 
+# %%
 tot_tokens = 0
 
 for instance_id, eval_, messages in requests:
@@ -331,4 +339,4 @@ date = datetime.datetime.now().strftime("%Y%m%d_%H%M")
 
 with open(os.path.join(evaluation_dir, f"output_{date}.json"), 'w') as f:
     json.dump(processed_meta_info, f, indent=4)
-# %%
+
